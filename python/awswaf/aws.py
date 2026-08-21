@@ -38,6 +38,15 @@ class AwsWaf:
         host = html.split("src=\"https://")[1].split("/challenge.js")[0]
         return goku_props, host
 
+    @staticmethod
+    def extract_sdk(html: str):
+        # SDK token model (e.g. StubHub): the page embeds
+        # <script src="https://<id>.edge.sdk.awswaf.com/<id>/<id>/challenge.compact.js">
+        # and has no inline gokuProps. The integration URL is used as the host.
+        idx = html.index("sdk.awswaf.com")
+        start = html.rindex("https://", 0, idx) + len("https://")
+        return html[start:].split("/challenge")[0]
+
     def get_inputs(self):
         return self.session.get(
             f"https://{self.endpoint}/inputs?client=browser").json()

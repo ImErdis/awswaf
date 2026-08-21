@@ -113,6 +113,31 @@ func ExtractCaptcha(html string) (GokuProps, string, error) {
 	return gokuProps, host, nil
 }
 
+// ExtractSDK returns the AWS WAF "integration" host from a page that loads the
+// challenge via the awswaf edge SDK (e.g. StubHub embeds
+// <script src="https://<id>.edge.sdk.awswaf.com/<id>/<id>/challenge.compact.js">).
+// Unlike Extract, these sites do not inline window.gokuProps; the challenge is
+// driven directly off the integration URL (host), which GetInputs/Verify use as
+// https://{host}/inputs and https://{host}/verify|/mp_verify.
+func ExtractSDK(html string) (string, error) {
+	marker := "sdk.awswaf.com"
+	i := strings.Index(html, marker)
+	if i == -1 {
+		return "", fmt.Errorf("awswaf sdk script not found")
+	}
+	start := strings.LastIndex(html[:i], "https://")
+	if start == -1 {
+		return "", fmt.Errorf("sdk url start not found")
+	}
+	start += len("https://")
+	tail := html[start:]
+	end := strings.Index(tail, "/challenge")
+	if end == -1 {
+		return "", fmt.Errorf("challenge script path not found")
+	}
+	return tail[:end], nil
+}
+
 func (a *Waf) GetInputs() (Inputs, error) {
 	url := fmt.Sprintf("https://%s/inputs?client=browser", a.Host)
 	
