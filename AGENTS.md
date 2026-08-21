@@ -11,6 +11,7 @@ Three parallel components:
 | Go solver | `main.go`, `internal/aws/**` | Main product | `go build ./...`, `go vet ./...`, `go run .` |
 | Python port | `python/**` | Alternate implementation | `cd python && python3 main.py` |
 | `deobf.js` | `deobf.js` | Dev tool to de-obfuscate AWS `challenge.js`/`captcha.js` | `node deobf.js <in.js>` |
+| RE toolkit | `re/**` | Stronger JS reverse-engineering pipeline (webcrack + synchrony + prettier) for porting new challenge types | `cd re && npm install && node deobf.mjs <in.js>` |
 
 Dependencies are already installed by the startup update script (`go mod download`,
 `npm install`, and `pip3 install curl_cffi pyscrypt cryptography` — the Python deps
@@ -37,7 +38,14 @@ are not captured in any requirements file in the repo).
 - `deobf.js` reads `in.js` by default (or `argv[2]`) and writes `out.js`. `in.js` /
   `out.js` are git-ignored and not shipped; the tool is tuned to a specific
   obfuscation pattern, so it exits with "Failed to detect necessary components" on
-  arbitrary input.
+  arbitrary input. For general-purpose deobfuscation use the `re/` toolkit instead.
+- **`re/` reverse-engineering toolkit is NOT installed by the cloud update script**
+  (it pulls the native `isolated-vm` addon via `webcrack`). Install on demand with
+  `cd re && npm install` (needs Node 22/24). `re/node_modules` and `re/samples` are
+  git-ignored. See `re/README.md` for the full workflow and current `mp_verify`
+  findings. Only the two hash-based PoW challenge types are implemented in the
+  solver; live AWS WAF targets currently serve the unimplemented `mp_verify`
+  (`ha9faaff…`) type, which needs a `solution_metadata` field in the verify body.
 
 ### Quick sanity check (no network, no API key)
 

@@ -1,0 +1,16 @@
+{
+  "name": "awswaf-re-toolkit",
+  "private": true,
+  "type": "module",
+  "description": "JS reverse-engineering toolkit for AWS WAF challenge.js (deobfuscation + dynamic extraction)",
+  "scripts": {
+    "fetch": "node fetch-challenge.mjs",
+    "deobf": "node deobf.mjs",
+    "handlers": "node find-handlers.mjs"
+  },
+  "dependencies": {
+    "deobfuscator": "^2.4.6",
+    "prettier": "^3.9.6",
+    "webcrack": "^2.16.0"
+  }
+}

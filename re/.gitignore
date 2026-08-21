@@ -1,0 +1,5 @@
+node_modules
+samples
+*.deobf.js
+*.cleaned.js
+out.js
