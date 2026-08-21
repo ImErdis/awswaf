@@ -24,13 +24,16 @@ are not captured in any requirements file in the repo).
   `go run .` / `go run ./...` must be launched from the repo root. The Python port
   reads `../webgl.json`, so it must be launched from inside `python/`. Running from
   the wrong directory panics/`FileNotFoundError` before any network call.
-- **Live targets can panic — this is not an environment problem.** `go run .`
-  (and `python/main.py`) hit real sites (HuggingFace / Binance). If the target
-  currently serves the `mp_verify` challenge type
-  (`ha9faaffd31b4d5ede2a2e19d2d7fd525f66fee61911511960dcbb52d3c48ce25`), the solver
-  panics with `unknown challengeType: ...` because only the two hash-based PoW types
-  are implemented. Reaching that point already proves the TLS request + challenge
-  parsing worked.
+- **Three challenge types are implemented:** scrypt PoW
+  (`h72f957…`), sha256 PoW (`h7b0c470…`), and NetworkBandwidth / `mp_verify`
+  (`ha9faaff…`). `mp_verify` is special: the solution is the base64 of a zeroed
+  buffer sized by difficulty (`{1:1KB,2:10KB,3:100KB,4:1MB,5:10MB}`), and it is
+  submitted as `multipart/form-data` to `{host}/mp_verify` with fields
+  `solution_metadata` (the normal verify JSON with `solution` nulled) and
+  `solution_data` (the base64). See `internal/aws/pow.go` `SolveBandwidth` +
+  `internal/aws/aws.go` `VerifyMp` (Go) and `python/awswaf/verify.py`
+  `solve_bandwidth` + `aws.py` `verify_mp` (Python). Any *other* unhandled type
+  still panics/raises with `unknown challengeType` — port it via the `re/` toolkit.
 - **Captcha (image) solving needs a Gemini API key.** `internal/aws/captcha/ai.go`
   calls `genai.NewClient(ctx, nil)`, which reads `GEMINI_API_KEY` / `GOOGLE_API_KEY`
   from the environment. The token/"invisible" PoW solve does NOT need it; only the
@@ -42,10 +45,9 @@ are not captured in any requirements file in the repo).
 - **`re/` reverse-engineering toolkit is NOT installed by the cloud update script**
   (it pulls the native `isolated-vm` addon via `webcrack`). Install on demand with
   `cd re && npm install` (needs Node 22/24). `re/node_modules` and `re/samples` are
-  git-ignored. See `re/README.md` for the full workflow and current `mp_verify`
-  findings. Only the two hash-based PoW challenge types are implemented in the
-  solver; live AWS WAF targets currently serve the unimplemented `mp_verify`
-  (`ha9faaff…`) type, which needs a `solution_metadata` field in the verify body.
+  git-ignored. See `re/README.md` for the full workflow. Use it to port any future
+  challenge type AWS introduces (the `mp_verify`/NetworkBandwidth type was ported
+  this way).
 
 ### Quick sanity check (no network, no API key)
 
