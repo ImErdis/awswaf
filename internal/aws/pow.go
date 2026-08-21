@@ -2,12 +2,38 @@ package aws
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"golang.org/x/crypto/scrypt"
 	"math/bits"
 	"strconv"
 )
+
+// mpVerifyType is the AWS WAF "NetworkBandwidth" challenge (submitted to the
+// /mp_verify endpoint). Its solution is the base64 encoding of a zeroed buffer
+// whose size is selected by the difficulty.
+const mpVerifyType = "ha9faaffd31b4d5ede2a2e19d2d7fd525f66fee61911511960dcbb52d3c48ce25"
+
+// bandwidthSizes maps a NetworkBandwidth difficulty to the number of zero bytes
+// that must be uploaded (extracted from challenge.js).
+var bandwidthSizes = map[int]int{
+	1: 1024,
+	2: 10240,
+	3: 102400,
+	4: 1048576,
+	5: 10485760,
+}
+
+// SolveBandwidth returns the base64 of a zeroed buffer sized by difficulty, which
+// is the "solution" for the NetworkBandwidth / mp_verify challenge type.
+func SolveBandwidth(difficulty int) (string, error) {
+	size, ok := bandwidthSizes[difficulty]
+	if !ok {
+		return "", fmt.Errorf("invalid NetworkBandwidth difficulty %d", difficulty)
+	}
+	return base64.StdEncoding.EncodeToString(make([]byte, size)), nil
+}
 
 func checkDigest(digest []byte, difficulty int) bool {
 	full := difficulty / 8
@@ -77,6 +103,8 @@ func SolveChallenge(challengeType, challengeInput, checksum string, difficulty i
 		return ComputeScryptNonce(challengeInput, checksum, difficulty)
 	} else if challengeType == "h7b0c470f0cfe3a80a9e26526ad185f484f6817d0832712a4a37a908786a6a67f" {
 		return HashPoW(challengeInput, checksum, difficulty)
+	} else if challengeType == mpVerifyType {
+		return SolveBandwidth(difficulty)
 	} else {
 		return "", fmt.Errorf("unknown challengeType: %s", challengeType)
 	}

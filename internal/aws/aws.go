@@ -1,13 +1,15 @@
 package aws
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"log"
 	"math/rand"
+	"mime/multipart"
 	"strings"
-	
+
 	http "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
@@ -109,6 +111,31 @@ func ExtractCaptcha(html string) (GokuProps, string, error) {
 	host := html[startURL:captchaIndex]
 	
 	return gokuProps, host, nil
+}
+
+// ExtractSDK returns the AWS WAF "integration" host from a page that loads the
+// challenge via the awswaf edge SDK (e.g. StubHub embeds
+// <script src="https://<id>.edge.sdk.awswaf.com/<id>/<id>/challenge.compact.js">).
+// Unlike Extract, these sites do not inline window.gokuProps; the challenge is
+// driven directly off the integration URL (host), which GetInputs/Verify use as
+// https://{host}/inputs and https://{host}/verify|/mp_verify.
+func ExtractSDK(html string) (string, error) {
+	marker := "sdk.awswaf.com"
+	i := strings.Index(html, marker)
+	if i == -1 {
+		return "", fmt.Errorf("awswaf sdk script not found")
+	}
+	start := strings.LastIndex(html[:i], "https://")
+	if start == -1 {
+		return "", fmt.Errorf("sdk url start not found")
+	}
+	start += len("https://")
+	tail := html[start:]
+	end := strings.Index(tail, "/challenge")
+	if end == -1 {
+		return "", fmt.Errorf("challenge script path not found")
+	}
+	return tail[:end], nil
 }
 
 func (a *Waf) GetInputs() (Inputs, error) {
@@ -283,6 +310,89 @@ func (a *Waf) Verify(payload *Verify) (string, error) {
 	return out.Token, nil
 }
 
+// VerifyMp submits a NetworkBandwidth (mp_verify) solution. Unlike the PoW types,
+// AWS WAF expects a multipart/form-data POST to /mp_verify with two fields:
+//   - solution_metadata: the normal verify body JSON, but with "solution" nulled
+//   - solution_data:     the actual solution (base64 of the zeroed buffer)
+func (a *Waf) VerifyMp(payload *Verify) (string, error) {
+	url := fmt.Sprintf("https://%s/mp_verify", a.Host)
+
+	solution := payload.Solution
+
+	// Build the metadata body: same fields as /verify, but solution = null.
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return "", err
+	}
+	meta["solution"] = nil
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return "", err
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("solution_metadata", string(metaJSON)); err != nil {
+		return "", err
+	}
+	if err := writer.WriteField("solution_data", solution); err != nil {
+		return "", err
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, &body)
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+	req.Header = http.Header{
+		"accept":             {"*/*"},
+		"accept-encoding":    {"gzip, deflate, br, zstd"},
+		"accept-language":    {"en-US,en;q=0.9"},
+		"content-type":       {writer.FormDataContentType()},
+		"priority":           {"u=1, i"},
+		"sec-ch-ua-mobile":   {"?0"},
+		"sec-ch-ua-platform": {`"Windows"`},
+		"sec-fetch-dest":     {"empty"},
+		"sec-fetch-mode":     {"cors"},
+		"sec-fetch-site":     {"cross-site"},
+		"user-agent":         {a.UserAgent},
+		http.HeaderOrderKey: {
+			"accept",
+			"accept-encoding",
+			"accept-language",
+			"content-length",
+			"content-type",
+			"priority",
+			"sec-ch-ua-mobile",
+			"sec-ch-ua-platform",
+			"sec-fetch-dest",
+			"sec-fetch-mode",
+			"sec-fetch-site",
+			"user-agent",
+		},
+	}
+
+	resp, err := a.Session.Do(req)
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var out VerifyRes
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Token, nil
+}
+
 func (a *Waf) Run() (string, error) {
 	inputs, err := a.GetInputs()
 	if err != nil {
@@ -292,6 +402,9 @@ func (a *Waf) Run() (string, error) {
 	payload, err := a.BuildPayload(inputs)
 	if err != nil {
 		return "", err
+	}
+	if inputs.ChallengeType == mpVerifyType {
+		return a.VerifyMp(payload)
 	}
 	return a.Verify(payload)
 }

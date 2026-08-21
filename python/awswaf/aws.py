@@ -1,7 +1,7 @@
 import random, json
 
-from curl_cffi import requests
-from awswaf.verify import CHALLENGE_TYPES
+from curl_cffi import requests, CurlMime
+from awswaf.verify import CHALLENGE_TYPES, MP_VERIFY_TYPE
 from awswaf.fingerprint import get_fp
 
 
@@ -37,6 +37,15 @@ class AwsWaf:
         goku_props = json.loads(html.split("window.gokuProps = ")[1].split(";")[0])
         host = html.split("src=\"https://")[1].split("/challenge.js")[0]
         return goku_props, host
+
+    @staticmethod
+    def extract_sdk(html: str):
+        # SDK token model (e.g. StubHub): the page embeds
+        # <script src="https://<id>.edge.sdk.awswaf.com/<id>/<id>/challenge.compact.js">
+        # and has no inline gokuProps. The integration URL is used as the host.
+        idx = html.index("sdk.awswaf.com")
+        start = html.rindex("https://", 0, idx) + len("https://")
+        return html[start:].split("/challenge")[0]
 
     def get_inputs(self):
         return self.session.get(
@@ -195,7 +204,37 @@ class AwsWaf:
             json=payload).json()
         return res["token"]
 
+    def verify_mp(self, payload):
+        # NetworkBandwidth (mp_verify): multipart/form-data POST to /mp_verify with
+        # solution_metadata (the verify body JSON, solution nulled) + solution_data.
+        solution = payload["solution"]
+        meta = dict(payload)
+        meta["solution"] = None
+
+        self.session.headers = {
+            "connection": "keep-alive",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "user-agent": self.user_agent,
+            "sec-ch-ua": "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"",
+            "sec-ch-ua-mobile": "?0",
+            "accept": "*/*",
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-dest": "empty",
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "accept-language": "en-US,en;q=0.9"
+        }
+        mp = CurlMime()
+        mp.addpart(name="solution_metadata", data=json.dumps(meta).encode())
+        mp.addpart(name="solution_data", data=solution.encode())
+        res = self.session.post(
+            f"https://{self.endpoint}/mp_verify",
+            multipart=mp).json()
+        return res["token"]
+
     def __call__(self):
         inputs = self.get_inputs()
         payload = self.build_payload(inputs)
+        if inputs["challenge_type"] == MP_VERIFY_TYPE:
+            return self.verify_mp(payload)
         return self.verify(payload)
